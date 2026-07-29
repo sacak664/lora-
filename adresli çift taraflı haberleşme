@@ -1,0 +1,73 @@
+//Lora 1
+#define MY_ADDR   1
+#define PEER_ADDR 11
+#define CHANNEL   18
+
+void setup() {
+  Serial.begin(9600);
+  Serial1.begin(9600);
+
+  Serial.println("LORA1 HAZIR");
+}
+
+void loop() {
+
+  // PC'den gelen mesajı gönder
+  if (Serial.available()) {
+
+    String msg = Serial.readStringUntil('\n');
+
+    // Fixed Mode başlığı
+    Serial1.write((byte)0);         // ADDH
+    Serial1.write((byte)PEER_ADDR); // ADDL
+    Serial1.write((byte)CHANNEL);   // Kanal
+
+    Serial1.println(msg);
+
+    Serial.print("GONDERILDI -> ");
+    Serial.println(msg);
+  }
+
+  // Gelen mesajları göster
+  while (Serial1.available()) {
+    char c = Serial1.read();
+    Serial.write(c);
+  }
+}
+************************************************
+//Lora 2
+#define MY_ADDR   11
+#define PEER_ADDR 1
+#define CHANNEL   18
+
+void setup() {
+  Serial.begin(9600);
+  Serial1.begin(9600);
+
+  Serial.println("LORA2 HAZIR");
+}
+
+void loop() {
+
+  // PC'den gelen mesajı gönder
+  if (Serial.available()) {
+
+    String msg = Serial.readStringUntil('\n');
+
+    // Fixed Mode başlığı
+    Serial1.write((byte)0);         // ADDH
+    Serial1.write((byte)PEER_ADDR); // ADDL
+    Serial1.write((byte)CHANNEL);   // Kanal
+
+    Serial1.println(msg);
+
+    Serial.print("GONDERILDI -> ");
+    Serial.println(msg);
+  }
+
+  // Gelen mesajları göster
+  while (Serial1.available()) {
+    char c = Serial1.read();
+    Serial.write(c);
+  }
+}
