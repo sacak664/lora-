@@ -1,0 +1,536 @@
+#include <EEPROM.h>
+
+//==================== PINLER ====================
+
+#define M0 7
+#define M1 6
+
+#define CMD_TEXT          0x01
+#define CMD_ACK           0x02
+#define CMD_PING          0x03
+#define CMD_PONG          0x04
+#define CMD_READ_CONFIG   0x05
+#define CMD_WRITE_CONFIG  0x06
+#define CMD_SYSTEM        0x07
+
+//==================== MODUL ADRESI ====================
+
+byte MY_ADDH = 0x00;
+byte MY_ADDL = 0x02;
+
+byte DEST_ADDH = 0x00;
+byte DEST_ADDL = 0x01;
+
+byte DEST_CHANNEL = 18;
+
+//==================== KONFIGURASYON ====================
+
+struct Config
+{
+  byte ADDH;
+  byte ADDL;
+  byte CHANNEL;
+  byte NETID;
+
+  byte BAUD;
+  byte PARITY;
+  byte AIRRATE;
+
+  byte PACKET;
+
+  byte POWER;
+
+  byte MODE;
+
+  char KEY[17];
+
+} cfg;
+//==================== PAKET ====================
+
+#define MAX_PACKET_SIZE 64
+
+byte txPacket[MAX_PACKET_SIZE];
+byte rxPacket[MAX_PACKET_SIZE];
+
+byte txLength = 0;
+byte rxLength = 0;
+//==================== MENU ====================
+
+enum MenuState
+{
+  MAIN_MENU,
+  NORMAL_MODE,
+  CONFIG_MENU,
+  PARAM_MENU,
+  VALUE_INPUT,
+  FAKE_SLEEP
+};
+
+MenuState state = MAIN_MENU;
+
+byte selectedParam = 0;
+
+//==================== TIMER ====================
+
+unsigned long lastActivity = 0;
+const unsigned long fakeSleepTime = 40000;
+
+//==================== TABLOLAR ====================
+
+const unsigned long baudOptions[8] =
+{
+  1200,
+  2400,
+  4800,
+  9600,
+  19200,
+  38400,
+  57600,
+  115200
+};
+
+const float airRateOptions[8] =
+{
+  0.3,
+  1.2,
+  2.4,
+  4.8,
+  9.6,
+  19.2,
+  38.4,
+  62.5
+};
+
+//==================== TEST VERISI ====================
+/*
+struct Signal
+{
+  char sifre[15];
+  char konum[15];
+  bool btn1;
+  byte btn2[10];
+  byte btn3[4];
+} data;
+*/
+//==================== PROTOTYPE ====================
+
+//==================== PROTOTYPE ====================
+
+void loadDefaults();
+
+void showMainMenu();
+void showConfigMenu();
+void showParamMenu(byte p);
+void showSystemInfo();
+
+void readSerialMenu();
+
+void setNormalMode();
+void setConfigMode();
+
+void sendPacket(byte command, String text);
+bool receivePacket();
+
+void fakeSleepControl();
+
+void saveEEPROM();
+void loadEEPROM();
+
+void writeParameters();
+void readParameters();
+
+void processMainMenu();
+void processConfigMenu();
+void processParameterMenu();
+void processNormalMode();
+void buildPacket(byte command, String text);
+//==================== SETUP ====================
+
+void setup()
+{
+  pinMode(M0,OUTPUT);
+  pinMode(M1,OUTPUT);
+
+  digitalWrite(M0,LOW);
+  digitalWrite(M1,LOW);
+
+  Serial.begin(9600);
+  Serial1.begin(9600);
+
+  loadDefaults();
+
+  showMainMenu();
+
+  lastActivity = millis();
+
+  Serial.println();
+  Serial.println("LORA FIRMWARE BASLADI");
+}
+
+//==================== LOOP ====================
+
+void loop()
+{
+
+  processMainMenu();
+
+  processConfigMenu();
+
+  processParameterMenu();
+
+  processNormalMode();
+
+  receivePacket();
+
+  fakeSleepControl();
+
+}
+//==========================================================
+// DEFAULT AYARLAR
+//==========================================================
+
+void loadDefaults()
+{
+  cfg.ADDH = 0;
+  cfg.ADDL = 2;
+  cfg.CHANNEL = 18;
+  cfg.NETID = 0;
+
+  cfg.BAUD = 3;
+  cfg.PARITY = 0;
+  cfg.AIRRATE = 2;
+
+  cfg.PACKET = 0;
+  cfg.POWER = 0;
+
+  cfg.MODE = 1;
+
+  strcpy(cfg.KEY,"0000000000000000");
+}
+
+//==========================================================
+// ANA MENU
+//==========================================================
+
+void showMainMenu()
+{
+  state = MAIN_MENU;
+
+  Serial.println();
+  Serial.println("======================================");
+  Serial.println("          LORA ANA MENU");
+  Serial.println("======================================");
+  Serial.println("1 -> NORMAL MODE");
+  Serial.println("2 -> CONFIG MODE");
+  Serial.println("3 -> SISTEM BILGISI");
+  Serial.println("======================================");
+}
+
+//==========================================================
+// CONFIG MENU
+//==========================================================
+
+void showConfigMenu()
+{
+  state = CONFIG_MENU;
+
+  Serial.println();
+  Serial.println("=========== CONFIG MENU ===========");
+
+  Serial.print("1  Address      : ");
+  Serial.println(cfg.ADDL);
+
+  Serial.print("2  Channel      : ");
+  Serial.println(cfg.CHANNEL);
+
+  Serial.print("3  NetID        : ");
+  Serial.println(cfg.NETID);
+
+  Serial.print("4  UART Baud    : ");
+  Serial.println(baudOptions[cfg.BAUD]);
+
+  Serial.print("5  Air Rate     : ");
+  Serial.print(airRateOptions[cfg.AIRRATE]);
+  Serial.println(" kbps");
+
+  Serial.print("6  Packet Size  : ");
+
+  switch(cfg.PACKET)
+  {
+    case 0: Serial.println("240 Byte"); break;
+    case 1: Serial.println("128 Byte"); break;
+    case 2: Serial.println("64 Byte"); break;
+    case 3: Serial.println("32 Byte"); break;
+  }
+
+  Serial.print("7  Power        : ");
+
+  switch(cfg.POWER)
+  {
+    case 0: Serial.println("22 dBm"); break;
+    case 1: Serial.println("17 dBm"); break;
+    case 2: Serial.println("13 dBm"); break;
+    case 3: Serial.println("10 dBm"); break;
+  }
+
+  Serial.print("8  Transmission : ");
+
+  if(cfg.MODE==0)
+    Serial.println("Transparent");
+  else
+    Serial.println("Fixed");
+
+  Serial.println();
+  Serial.println("9  Parametre Degistir");
+  Serial.println("10 Kaydet");
+  Serial.println("11 Ana Menu");
+  Serial.println("===================================");
+}
+
+//==========================================================
+// PARAM MENU
+//==========================================================
+
+void showParamMenu(byte p)
+{
+  Serial.println();
+
+  switch(p)
+  {
+    case 1:
+
+      Serial.println("Yeni Address Giriniz");
+      break;
+
+    case 2:
+
+      Serial.println("Yeni Channel Giriniz");
+      break;
+
+    case 3:
+
+      Serial.println("Yeni NetID Giriniz");
+      break;
+
+    case 4:
+
+      Serial.println("UART BAUD");
+      Serial.println("1-1200");
+      Serial.println("2-2400");
+      Serial.println("3-4800");
+      Serial.println("4-9600");
+      Serial.println("5-19200");
+      Serial.println("6-38400");
+      Serial.println("7-57600");
+      Serial.println("8-115200");
+      break;
+
+    case 5:
+
+      Serial.println("AIR RATE");
+      Serial.println("1-0.3");
+      Serial.println("2-1.2");
+      Serial.println("3-2.4");
+      Serial.println("4-4.8");
+      Serial.println("5-9.6");
+      Serial.println("6-19.2");
+      Serial.println("7-38.4");
+      Serial.println("8-62.5");
+      break;
+
+    case 6:
+
+      Serial.println("Packet Size");
+      Serial.println("1-240");
+      Serial.println("2-128");
+      Serial.println("3-64");
+      Serial.println("4-32");
+      break;
+
+    case 7:
+
+      Serial.println("Power");
+      Serial.println("1-22");
+      Serial.println("2-17");
+      Serial.println("3-13");
+      Serial.println("4-10");
+      break;
+
+    case 8:
+
+      Serial.println("1 Transparent");
+      Serial.println("2 Fixed");
+      break;
+
+  }
+}
+
+//==========================================================
+// SISTEM BILGISI
+//==========================================================
+
+void showSystemInfo()
+{
+  Serial.println();
+
+  Serial.println("========== SISTEM ==========");
+
+  Serial.print("MY ADDRESS : ");
+  Serial.println(MY_ADDL);
+
+  Serial.print("TARGET     : ");
+  Serial.println(DEST_ADDL);
+
+  Serial.print("CHANNEL    : ");
+  Serial.println(cfg.CHANNEL);
+
+  Serial.print("UART BAUD  : ");
+  Serial.println(baudOptions[cfg.BAUD]);
+
+  Serial.print("AIR RATE   : ");
+  Serial.print(airRateOptions[cfg.AIRRATE]);
+  Serial.println(" kbps");
+
+  Serial.println("============================");
+
+  showMainMenu();
+}
+//==========================================================
+// ANA MENU KONTROLU
+//==========================================================
+
+void processMainMenu()
+{
+  if(state != MAIN_MENU)
+    return;
+
+  if(!Serial.available())
+    return;
+
+  String input = Serial.readStringUntil('\n');
+  input.trim();
+
+  if(input=="1")
+  {
+    setNormalMode();
+    return;
+  }
+
+  if(input=="2")
+  {
+    setConfigMode();
+    return;
+  }
+
+  if(input=="3")
+  {
+    showSystemInfo();
+    return;
+  }
+
+  Serial.println("Hatali Secim");
+  showMainMenu();
+}
+//==========================================================
+// NORMAL MODE
+//==========================================================
+
+void setNormalMode()
+{
+  digitalWrite(M0,LOW);
+  digitalWrite(M1,LOW);
+
+  delay(100);
+
+  state = NORMAL_MODE;
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("NORMAL MODE");
+  Serial.println("================================");
+  Serial.println("Mesaj yazip ENTER'a basin.");
+  Serial.println("MENU icin -> menu");
+  Serial.println();
+
+  lastActivity = millis();
+}
+//==========================================================
+// CONFIG MODE
+//==========================================================
+
+void setConfigMode()
+{
+  digitalWrite(M0,LOW);
+  digitalWrite(M1,HIGH);
+
+  delay(100);
+
+  showConfigMenu();
+}
+//==========================================================
+// CRC HESABI
+//==========================================================
+
+byte calculateCRC(byte *buffer, byte length)
+{
+    byte crc = 0;
+
+    for(byte i=0;i<length;i++)
+    {
+        crc ^= buffer[i];
+    }
+
+    return crc;
+}
+//==========================================================
+// PAKET OLUSTUR
+//==========================================================
+
+void buildPacket(byte command, String text)
+{
+    txLength = 0;
+
+    txPacket[txLength++] = DEST_ADDH;
+    txPacket[txLength++] = DEST_ADDL;
+    txPacket[txLength++] = cfg.CHANNEL;
+
+    txPacket[txLength++] = command;
+
+    byte len = text.length();
+
+    txPacket[txLength++] = len;
+
+    for(byte i=0;i<len;i++)
+    {
+        txPacket[txLength++] = text[i];
+    }
+
+    byte crc = calculateCRC(&txPacket[3],len+2);
+
+    txPacket[txLength++] = crc;
+}
+//==========================================================
+// PAKET GONDER
+//==========================================================
+
+void sendPacket(byte command, String text)
+{
+    buildPacket(command, text);
+
+    Serial1.write(txPacket, txLength);
+
+    Serial.print("TX -> ");
+
+    for(byte i=0; i<txLength; i++)
+    {
+        if(txPacket[i] < 16)
+            Serial.print("0");
+
+        Serial.print(txPacket[i], HEX);
+        Serial.print(" ");
+    }
+
+    Serial.println();
+
+    lastActivity = millis();
+}
